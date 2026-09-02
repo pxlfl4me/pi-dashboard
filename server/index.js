@@ -761,7 +761,7 @@ app.get('/api/wireguard', requireAuth, async (req, res) => {
 });
 
 // Get WireGuard settings (for dashboard)
-app.get('/api/settings/wireguard', async (req, res) => {
+app.get('/api/settings/wireguard', requireAuth, async (req, res) => {
   try {
     const settings = await loadSettings();
     const wgConfig = settings.wireguard || { enabled: false, interface: 'wg0' };
@@ -805,7 +805,7 @@ app.put('/api/settings/wireguard', requireAuth, async (req, res) => {
 // API Routes - Internal
 // ===================
 
-app.get('/api/stats', async (req, res) => {
+app.get('/api/stats', requireAuth, async (req, res) => {
   try {
     const stats = await getSystemStats();
     if (stats.pm2) {
@@ -844,7 +844,7 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });
 });
 
-app.get('/api/sysinfo', async (req, res) => {
+app.get('/api/sysinfo', requireAuth, async (req, res) => {
   try {
     const info = await getSystemInfo();
     res.json(info);
@@ -854,7 +854,7 @@ app.get('/api/sysinfo', async (req, res) => {
   }
 });
 
-app.get('/api/services', async (req, res) => {
+app.get('/api/services', requireAuth, async (req, res) => {
   try {
     const services = await loadServices();
     const results = await Promise.all(services.map(checkService));
@@ -866,7 +866,7 @@ app.get('/api/services', async (req, res) => {
 });
 
 // Get all dashboard settings
-app.get('/api/settings', async (req, res) => {
+app.get('/api/settings', requireAuth, async (req, res) => {
   try {
     const settings = await loadSettings();
     res.json(settings.dashboard);
@@ -896,7 +896,7 @@ app.put('/api/settings', requireAuth, async (req, res) => {
 });
 
 // Get API settings
-app.get('/api/settings/api', async (req, res) => {
+app.get('/api/settings/api', requireAuth, async (req, res) => {
   try {
     const settings = await loadSettings();
     const apiConfig = settings.api || DEFAULT_SETTINGS.api;
@@ -957,7 +957,7 @@ app.put('/api/settings/api', requireAuth, async (req, res) => {
 // ===================
 
 // Discover services by scanning listening ports
-app.get('/api/services/discover', async (req, res) => {
+app.get('/api/services/discover', requireAuth, async (req, res) => {
   try {
     const discovered = await discoverServices();
     const configured = await loadAllServices();
@@ -981,7 +981,7 @@ app.get('/api/services/discover', async (req, res) => {
 });
 
 // Get services config (all services, for editing)
-app.get('/api/services/config', async (req, res) => {
+app.get('/api/services/config', requireAuth, async (req, res) => {
   try {
     const services = await loadAllServices();
     res.json({ services, requiresAuth: !!CONFIG.adminToken });
