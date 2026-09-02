@@ -19,6 +19,7 @@ WORKDIR /app
 
 # Install dependencies for systeminformation, network stats, and WireGuard
 RUN apk add --no-cache procps util-linux iproute2 wireguard-tools
+RUN npm install -g pm2
 
 COPY package*.json ./
 RUN npm ci --omit=dev
