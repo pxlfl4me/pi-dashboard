@@ -481,7 +481,7 @@ function isPm2Available() {
 // Get PM2 process list via `pm2 jlist` (only called when PM2 is available)
 function getPm2Processes() {
   try {
-    const output = execSync('pm2 jlist', {
+    const output = execSync('pm2 jlist --silent', {
       encoding: 'utf-8',
       timeout: 3000,
       maxBuffer: 5 * 1024 * 1024
