@@ -414,6 +414,22 @@
         </div>
       </section>
 
+      <!-- PM2 Processes Section (hidden until PM2 is detected) -->
+      <section class="pm2-section" id="pm2-section" style="display: none;">
+        <h2 class="section-title">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="section-icon">
+            <polygon points="12 2 2 7 12 12 22 7 12 2"/>
+            <polyline points="2 17 12 22 22 17"/>
+            <polyline points="2 12 12 17 22 12"/>
+          </svg>
+          PM2 Processes
+          <span class="pm2-count" id="pm2-count">0 online</span>
+        </h2>
+        <div class="pm2-grid" id="pm2-grid">
+          <div class="no-pm2">No PM2 processes detected</div>
+        </div>
+      </section>
+
       <!-- WireGuard Section (hidden by default) -->
       <section class="wireguard-section" id="wireguard-section" style="display: none;">
         <h2 class="section-title">

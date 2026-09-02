@@ -341,6 +341,9 @@ const elements = {
   disksGrid: document.getElementById('disks-grid'),
   containersGrid: document.getElementById('containers-grid'),
   containerCount: document.getElementById('container-count'),
+  pm2Section: document.getElementById('pm2-section'),
+  pm2Grid: document.getElementById('pm2-grid'),
+  pm2Count: document.getElementById('pm2-count'),
   networkGrid: document.getElementById('network-grid'),
   servicesGrid: document.getElementById('services-grid'),
   processesList: document.getElementById('processes-list'),
@@ -522,6 +525,112 @@ function createContainerCards(containers) {
     `;
   }).join('');
 }
+
+// PM2 admin token — kept only in sessionStorage (cleared when the tab closes),
+function getPm2Token() {
+  return sessionStorage.getItem('pm2AdminToken') || '';
+}
+
+function setPm2Token(token) {
+  sessionStorage.setItem('pm2AdminToken', token);
+}
+
+function clearPm2Token() {
+  sessionStorage.removeItem('pm2AdminToken');
+}
+
+// Create PM2 process cards (only shown if PM2 is detected on the system)
+function createPm2Cards(pm2) {
+  const available = pm2 && pm2.available;
+  elements.pm2Section.style.display = available ? '' : 'none';
+
+  if (!available) return;
+
+  const processes = pm2.processes || [];
+  const actionsEnabled = !!pm2.actionsEnabled;
+  const onlineCount = processes.filter(p => p.status === 'online').length;
+  elements.pm2Count.textContent = `${onlineCount} online`;
+
+  if (processes.length === 0) {
+    elements.pm2Grid.innerHTML = '<div class="no-pm2">No PM2 processes detected</div>';
+    return;
+  }
+
+  elements.pm2Grid.innerHTML = processes.map(proc => {
+    const statusClass = proc.status === 'online' ? 'online'
+      : (proc.status === 'stopped' || proc.status === 'errored') ? 'stopped'
+      : 'pending';
+
+    const actionsHtml = actionsEnabled
+      ? `
+        <div class="pm2-actions">
+          <button class="pm2-btn start" data-action="start" data-id="${proc.id}" title="Start">Start</button>
+          <button class="pm2-btn restart" data-action="restart" data-id="${proc.id}" title="Restart">Restart</button>
+          <button class="pm2-btn stop" data-action="stop" data-id="${proc.id}" title="Stop">Stop</button>
+        </div>
+      `
+      : `<div class="pm2-actions-locked" title="Set ADMIN_TOKEN to enable process control">Actions disabled — set ADMIN_TOKEN</div>`;
+
+    return `
+      <div class="pm2-card">
+        <div class="pm2-header">
+          <span class="pm2-name">${proc.name}</span>
+          <span class="pm2-status ${statusClass}"><span class="status-dot"></span>${proc.status}</span>
+        </div>
+        <div class="pm2-id">id: ${proc.id}</div>
+        <div class="pm2-stats">
+          <div class="pm2-stat"><div class="pm2-stat-label">CPU</div><div class="pm2-stat-value cpu">${proc.cpu}%</div></div>
+          <div class="pm2-stat"><div class="pm2-stat-label">Memory</div><div class="pm2-stat-value mem">${formatBytes(proc.mem)}</div></div>
+        </div>
+        ${actionsHtml}
+      </div>
+    `;
+  }).join('');
+}
+
+// Send a start/restart/stop action for a PM2 process
+async function runPm2Action(action, id, button) {
+  let token = getPm2Token();
+  if (!token) {
+    token = window.prompt('Enter the Admin Token (X-Admin-Token) to confirm this PM2 action:');
+    if (!token) return; // user cancelled — no request sent
+    setPm2Token(token);
+  }
+
+  const grid = elements.pm2Grid;
+  grid.querySelectorAll('.pm2-btn').forEach(btn => btn.disabled = true);
+  button.classList.add('loading');
+
+  try {
+    const response = await fetch(`${API_URL}/pm2/${action}/${id}`, {
+      method: 'POST',
+      headers: { 'X-Admin-Token': token }
+    });
+    const data = await response.json().catch(() => ({}));
+
+    if (response.status === 401) {
+      clearPm2Token();
+      throw new Error('Invalid token — please try again');
+    }
+    if (!response.ok) {
+      throw new Error(data.error || `HTTP ${response.status}`);
+    }
+
+    showToast('success', 'PM2', `Process ${id} ${action}ed successfully`);
+  } catch (error) {
+    showToast('error', 'PM2', error.message || `Failed to ${action} process ${id}`);
+  } finally {
+    grid.querySelectorAll('.pm2-btn').forEach(btn => btn.disabled = false);
+    button.classList.remove('loading');
+  }
+}
+
+// Event delegation: the grid is re-rendered on every poll, so bind once on the parent
+elements.pm2Grid.addEventListener('click', (e) => {
+  const button = e.target.closest('.pm2-btn');
+  if (!button) return;
+  runPm2Action(button.dataset.action, button.dataset.id, button);
+});
 
 // Create network cards
 function createNetworkCards(network) {
@@ -943,6 +1052,9 @@ async function updateDashboard() {
 
     // Update Containers
     createContainerCards(stats.containers || []);
+
+    // Update PM2 processes (section stays hidden if PM2 isn't detected)
+    createPm2Cards(stats.pm2 || { available: false, processes: [] });
 
     // Update Network
     createNetworkCards(stats.network || { interfaces: [], stats: [] });

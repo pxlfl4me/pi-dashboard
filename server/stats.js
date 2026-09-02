@@ -2,7 +2,7 @@ import si from 'systeminformation';
 import os from 'os';
 import fs from 'fs';
 import http from 'http';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import { KNOWN_SERVICES, KNOWN_PROCESSES } from './services-config.js';
 
 // Get Raspberry Pi throttle status via vcgencmd
@@ -454,6 +454,79 @@ async function getTopProcesses() {
   }
 }
 
+// ===================
+// PM2 Process Manager
+// ===================
+
+// Detect PM2 presence once and cache the result for the process lifetime
+let pm2AvailableCache = null;
+
+function isPm2Available() {
+  if (pm2AvailableCache !== null) return pm2AvailableCache;
+
+  try {
+    execSync('pm2 --version', {
+      encoding: 'utf-8',
+      timeout: 1000,
+      stdio: ['ignore', 'pipe', 'ignore']
+    });
+    pm2AvailableCache = true;
+  } catch (e) {
+    pm2AvailableCache = false;
+  }
+
+  return pm2AvailableCache;
+}
+
+// Get PM2 process list via `pm2 jlist` (only called when PM2 is available)
+function getPm2Processes() {
+  try {
+    const output = execSync('pm2 jlist', {
+      encoding: 'utf-8',
+      timeout: 3000,
+      maxBuffer: 5 * 1024 * 1024
+    });
+
+    const list = JSON.parse(output);
+
+    return list.map(proc => {
+      const env = proc.pm2_env || {};
+      const monit = proc.monit || {};
+
+      return {
+        id: proc.pm_id,
+        name: proc.name,
+        status: env.status || 'unknown', // online, stopping, stopped, launching, errored
+        cpu: monit.cpu || 0,
+        mem: monit.memory || 0, // bytes
+        uptime: env.pm_uptime || null,
+        restarts: env.restart_time || 0
+      };
+    });
+  } catch (error) {
+    console.error('Failed to get PM2 processes:', error.message);
+    return [];
+  }
+}
+
+const PM2_VALID_ACTIONS = ['start', 'restart', 'stop'];
+
+// Run a PM2 action (start/restart/stop) on a process by its PM2 id
+// Uses execFileSync (no shell) so the id/action can never be used for injection
+export function pm2Action(action, id) {
+  if (!PM2_VALID_ACTIONS.includes(action)) {
+    throw new Error('Invalid PM2 action');
+  }
+  if (!/^\d+$/.test(String(id))) {
+    throw new Error('Invalid PM2 process id');
+  }
+
+  execFileSync('pm2', [action, String(id)], {
+    encoding: 'utf-8',
+    timeout: 10000
+  });
+}
+
 // Read CPU usage from cgroup v2 cpu.stat
 function readCgroupCpuUsage(containerId) {
   const cgroupBase = fs.existsSync('/host/sys/fs/cgroup') 
@@ -823,7 +896,17 @@ export async function getSystemStats() {
   }
 
   const overclock = getOverclockStatus();
-  
+
+  // Get PM2 processes (only if PM2 is detected on this system)
+  let pm2 = { available: false, processes: [] };
+  try {
+    if (isPm2Available()) {
+      pm2 = { available: true, processes: getPm2Processes() };
+    }
+  } catch (error) {
+    console.error('PM2 stats error:', error.message);
+  }
+
   return {
     cpu: {
       usage: Math.round(cpu.currentLoad * 10) / 10,
@@ -863,6 +946,7 @@ export async function getSystemStats() {
     disks: staticCache.disks,
     containers,
     network: getHostNetworkInfo(),
-    processes: await getTopProcesses()
+    processes: await getTopProcesses(),
+    pm2
   };
 }

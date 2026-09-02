@@ -1,5 +1,5 @@
 import express from 'express';
-import { getSystemStats, getSystemInfo, discoverServices } from './stats.js';
+import { getSystemStats, getSystemInfo, discoverServices, pm2Action } from './stats.js';
 import { VALID_CHECK_TYPES, inferCheckType, inferIcon } from './services-config.js';
 import http from 'http';
 import net from 'net';
@@ -167,6 +167,25 @@ function requireAuth(req, res, next) {
   
   const token = req.headers['x-admin-token'] || req.query.token;
   if (token !== CONFIG.adminToken) {
+    return res.status(401).json({ error: 'Unauthorized. Set X-Admin-Token header.' });
+  }
+  next();
+}
+
+// Stricter auth for PM2 process control: unlike requireAuth, this NEVER
+// falls back to "allow all" when no token is configured — it disables
+// the actions outright instead. Starting/stopping processes is more
+// sensitive than a dashboard setting, so it requires an explicit,
+// correctly-authenticated request every time.
+function requirePm2Auth(req, res, next) {
+  if (!CONFIG.adminToken) {
+    return res.status(403).json({
+      error: 'PM2 actions are disabled. Set ADMIN_TOKEN to enable them.'
+    });
+  }
+
+  const token = req.headers['x-admin-token'] || req.query.token;
+  if (!token || token !== CONFIG.adminToken) {
     return res.status(401).json({ error: 'Unauthorized. Set X-Admin-Token header.' });
   }
   next();
@@ -482,6 +501,7 @@ app.get('/api/v1/system', requireApiKey, async (req, res) => {
       network: stats.network,
       containers: stats.containers,
       processes: stats.processes,
+      pm2: stats.pm2 ? { ...stats.pm2, actionsEnabled: !!CONFIG.adminToken } : stats.pm2,
       baseboard: info.baseboard,
       services
     };
@@ -788,10 +808,35 @@ app.put('/api/settings/wireguard', requireAuth, async (req, res) => {
 app.get('/api/stats', async (req, res) => {
   try {
     const stats = await getSystemStats();
+    if (stats.pm2) {
+      // Tell the client whether actions are usable — never expose the token itself
+      stats.pm2.actionsEnabled = !!CONFIG.adminToken;
+    }
     res.json(stats);
   } catch (error) {
     console.error('Error fetching stats:', error.message);
     res.status(500).json({ error: 'Failed to fetch system stats' });
+  }
+});
+
+// PM2 process actions: start / restart / stop a process by its PM2 id
+app.post('/api/pm2/:action/:id', requirePm2Auth, (req, res) => {
+  const { action, id } = req.params;
+  const validActions = ['start', 'restart', 'stop'];
+
+  if (!validActions.includes(action)) {
+    return res.status(400).json({ error: 'Invalid action. Use start, restart or stop.' });
+  }
+  if (!/^\d+$/.test(id)) {
+    return res.status(400).json({ error: 'Invalid process id' });
+  }
+
+  try {
+    pm2Action(action, id);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('PM2 action error:', error.message);
+    res.status(500).json({ error: error.message || 'Failed to run PM2 action' });
   }
 });
 
