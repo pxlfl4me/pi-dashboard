@@ -20,7 +20,7 @@ services:
       # Admin token for protected endpoints (service config)
       # Leave empty to disable auth (dev mode)
       # Generate one: openssl rand -hex 16
-      - ADMIN_TOKEN=
+      - ADMIN_TOKEN=${ADMIN_TOKEN}
 
       # CORS allowed origins (comma-separated)
       # "*" = allow all (ok for local network)
@@ -40,6 +40,12 @@ services:
 
       # WireGuard config (for client names mapping)
       - /etc/wireguard:/etc/wireguard:ro
+
+      # PM2: mount the HOST user's PM2 home directory (read-write) so the
+      # pm2 CLI inside the container connects to the SAME daemon that
+      # manages your processes on the Pi, instead of starting its own.
+      # ${HOME} is resolved from the shell that runs `docker compose up`
+      - ${HOME}/.pm2:/root/.pm2
 
     # Host namespaces for full system access
     pid: host
