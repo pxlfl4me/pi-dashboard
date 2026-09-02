@@ -1,9 +1,7 @@
 services:
   pi-dashboard:
-    # Pre-built image from Docker Hub (recommended)
-    image: usernamedigital/pi-dashboard:latest
     # Or build locally from source:
-    # build: .
+    build: .
     container_name: pi-dashboard
     restart: unless-stopped
 
