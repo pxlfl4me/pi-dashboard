@@ -24,6 +24,9 @@ services:
       # "*" = allow all (ok for local network)
       - CORS_ORIGINS=*
 
+      # PM2: run as root (required for PM2 to connect to the Pi's PM2 daemon)
+      - PM2_HOME=/root/.pm2
+
     volumes:
       # Persistent settings (dashboard config, services, API keys)
       - ./data:/app/data
@@ -43,7 +46,7 @@ services:
       # pm2 CLI inside the container connects to the SAME daemon that
       # manages your processes on the Pi, instead of starting its own.
       # ${HOME} is resolved from the shell that runs `docker compose up`
-      - ${HOME}/.pm2:/root/.pm2
+      - /home/administrator/.pm2:/root/.pm2
 
     # Host namespaces for full system access
     pid: host
