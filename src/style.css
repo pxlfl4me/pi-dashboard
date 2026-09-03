@@ -185,6 +185,9 @@ body {
 
 /* Header */
 header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin-bottom: 32px;
   padding: 24px 0;
   border-bottom: 1px solid transparent;
@@ -194,6 +197,7 @@ header {
   background-clip: padding-box, border-box;
   transition: transform 0.3s ease, opacity 0.3s ease;
   border-radius: 33px;
+  
 }
 
 header.header-hidden {
@@ -206,6 +210,7 @@ header.header-hidden {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  width: 95%;
 }
 
 .logo {
