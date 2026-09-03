@@ -30,6 +30,19 @@
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
+  <div id="lock-screen" class="lock-screen">
+    <div class="lock-card">
+      <div class="lock-icon">🔒</div>
+      <h1>Accesso protetto</h1>
+      <p>Inserisci il token admin per continuare</p>
+      <form id="lock-form" autocomplete="off">
+        <input type="password" id="lock-token" placeholder="Admin token" autocomplete="new-password" required>
+        <button type="submit">Sblocca</button>
+      </form>
+      <div id="lock-error" class="lock-error"></div>
+    </div>
+  </div>
+
   <div class="background-glow"></div>
 
   <!-- SVG Icon Sprite (hidden, referenced via <use>) -->

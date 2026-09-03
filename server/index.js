@@ -159,6 +159,71 @@ async function saveServices(services) {
 // Auth Middleware
 // ===================
 
+const SESSION_COOKIE = 'pd_session';
+const SESSION_TTL = 12 * 60 * 60 * 1000;
+
+function readCookie(req, name) {
+  const header = req.headers.cookie;
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx === -1) continue;
+    if (part.slice(0, idx).trim() === name) return decodeURIComponent(part.slice(idx + 1).trim());
+  }
+  return null;
+}
+
+function safeEqual(a, b) {
+  const bufA = Buffer.from(a || '');
+  const bufB = Buffer.from(b || '');
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+function hasValidSession(req) {
+  const cookie = readCookie(req, SESSION_COOKIE);
+  if (!cookie) return false;
+  const [expiry, sig] = cookie.split('.');
+  if (!expiry || !sig) return false;
+  if (Date.now() > Number(expiry)) return false;
+  const expected = crypto.createHmac('sha256', CONFIG.adminToken).update(expiry).digest('hex');
+  return safeEqual(sig, expected);
+}
+
+function isAuthed(req) {
+  if (!CONFIG.adminToken) return true;
+  const header = req.headers['x-admin-token'];
+  if (header && safeEqual(header, CONFIG.adminToken)) return true;
+  return hasValidSession(req);
+}
+
+function startSession(req, res) {
+  const expiry = Date.now() + SESSION_TTL;
+  const sig = crypto.createHmac('sha256', CONFIG.adminToken).update(String(expiry)).digest('hex');
+  const secure = req.secure ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=${expiry}.${sig}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${Math.floor(SESSION_TTL / 1000)}${secure}`);
+}
+
+function endSession(res) {
+  res.setHeader('Set-Cookie', `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0`);
+}
+
+const loginAttempts = new Map();
+const LOGIN_WINDOW = 10 * 60 * 1000;
+const LOGIN_MAX_ATTEMPTS = 5;
+
+function loginBlocked(ip) {
+  const attempts = (loginAttempts.get(ip) || []).filter(t => t > Date.now() - LOGIN_WINDOW);
+  loginAttempts.set(ip, attempts);
+  return attempts.length >= LOGIN_MAX_ATTEMPTS;
+}
+
+function recordFailedLogin(ip) {
+  const attempts = loginAttempts.get(ip) || [];
+  attempts.push(Date.now());
+  loginAttempts.set(ip, attempts);
+}
+
 function requireAuth(req, res, next) {
   // If no admin token configured, allow all (dev mode)
   if (!CONFIG.adminToken) {
@@ -166,27 +231,17 @@ function requireAuth(req, res, next) {
   }
   
   const token = req.headers['x-admin-token'] || req.query.token;
-  if (token !== CONFIG.adminToken) {
-    return res.status(401).json({ error: 'Unauthorized. Set X-Admin-Token header.' });
-  }
-  next();
+  if (token && safeEqual(token, CONFIG.adminToken)) return next();
+  if (hasValidSession(req)) return next();
+  return res.status(401).json({ error: 'Unauthorized. Set X-Admin-Token header.' });
 }
 
-// Stricter auth for PM2 process control: unlike requireAuth, this NEVER
-// falls back to "allow all" when no token is configured — it disables
-// the actions outright instead. Starting/stopping processes is more
-// sensitive than a dashboard setting, so it requires an explicit,
-// correctly-authenticated request every time.
+// Actions stay disabled with no ADMIN_TOKEN set, unlike requireAuth's dev mode fallback
 function requirePm2Auth(req, res, next) {
   if (!CONFIG.adminToken) {
     return res.status(403).json({
       error: 'PM2 actions are disabled. Set ADMIN_TOKEN to enable them.'
     });
-  }
-
-  const token = req.headers['x-admin-token'] || req.query.token;
-  if (!token || token !== CONFIG.adminToken) {
-    return res.status(401).json({ error: 'Unauthorized. Set X-Admin-Token header.' });
   }
   next();
 }
@@ -455,6 +510,51 @@ app.use('/api/services/config', (req, res, next) => {
   }
   
   next();
+});
+
+app.disable('x-powered-by');
+
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'geolocation=(), camera=(), microphone=()');
+  next();
+});
+
+const OPEN_AUTH_PATHS = ['/health', '/auth/login', '/auth/status', '/auth/logout'];
+
+app.use('/api', (req, res, next) => {
+  if (OPEN_AUTH_PATHS.includes(req.path) || req.path.startsWith('/v1/')) return next();
+  if (isAuthed(req)) return next();
+  res.status(401).json({ error: 'Authentication required' });
+});
+
+app.get('/api/auth/status', (req, res) => {
+  res.json({ required: !!CONFIG.adminToken, authenticated: isAuthed(req) });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  if (!CONFIG.adminToken) return res.json({ success: true });
+
+  const ip = req.ip || req.connection.remoteAddress;
+  if (loginBlocked(ip)) {
+    return res.status(429).json({ error: 'Too many attempts, try again later' });
+  }
+
+  const token = (req.body && req.body.token) || '';
+  if (!safeEqual(token, CONFIG.adminToken)) {
+    recordFailedLogin(ip);
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+
+  startSession(req, res);
+  res.json({ success: true });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  endSession(res);
+  res.json({ success: true });
 });
 
 // ===================

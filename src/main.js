@@ -526,19 +526,6 @@ function createContainerCards(containers) {
   }).join('');
 }
 
-// PM2 admin token — kept only in sessionStorage (cleared when the tab closes),
-function getPm2Token() {
-  return sessionStorage.getItem('pm2AdminToken') || '';
-}
-
-function setPm2Token(token) {
-  sessionStorage.setItem('pm2AdminToken', token);
-}
-
-function clearPm2Token() {
-  sessionStorage.removeItem('pm2AdminToken');
-}
-
 // Create PM2 process cards (only shown if PM2 is detected on the system)
 function createPm2Cards(pm2) {
   const available = pm2 && pm2.available;
@@ -590,31 +577,20 @@ function createPm2Cards(pm2) {
 
 // Send a start/restart/stop action for a PM2 process
 async function runPm2Action(action, id, button) {
-  let token = getPm2Token();
-  if (!token) {
-    token = window.prompt('Enter the Admin Token (X-Admin-Token) to confirm this PM2 action:');
-    if (!token) return; // user cancelled — no request sent
-    setPm2Token(token);
-  }
-
   const grid = elements.pm2Grid;
   grid.querySelectorAll('.pm2-btn').forEach(btn => btn.disabled = true);
   button.classList.add('loading');
 
   try {
-    const response = await fetch(`${API_URL}/pm2/${action}/${id}`, {
-      method: 'POST',
-      headers: { 'X-Admin-Token': token }
-    });
-    const data = await response.json().catch(() => ({}));
+    const response = await fetch(`${API_URL}/pm2/${action}/${id}`, { method: 'POST' });
 
     if (response.status === 401) {
-      clearPm2Token();
-      throw new Error('Invalid token — please try again');
+      showLock();
+      throw new Error('Sessione scaduta, effettua di nuovo il login');
     }
-    if (!response.ok) {
-      throw new Error(data.error || `HTTP ${response.status}`);
-    }
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
 
     showToast('success', 'PM2', `Process ${id} ${action}ed successfully`);
   } catch (error) {
@@ -927,6 +903,10 @@ function getTempColor(temp) {
 async function updateDashboard() {
   try {
     const response = await fetch(`${API_URL}/stats`);
+    if (response.status === 401) {
+      showLock();
+      return;
+    }
     const stats = await response.json();
 
     // Update hostname
@@ -1122,9 +1102,60 @@ async function initApp() {
   setInterval(updateServices, 10000); // Check services every 10 seconds
 }
 
-initApp();
+const lockScreen = document.getElementById('lock-screen');
+const lockForm = document.getElementById('lock-form');
+const lockInput = document.getElementById('lock-token');
+const lockError = document.getElementById('lock-error');
 
-// Track last update timestamp
+function showLock() {
+  lockScreen.classList.add('visible');
+  lockInput.value = '';
+  setTimeout(() => lockInput.focus(), 50);
+}
+
+function hideLock() {
+  lockScreen.classList.remove('visible');
+}
+
+lockForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  lockError.textContent = '';
+
+  try {
+    const res = await fetch(`${API_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: lockInput.value })
+    });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      lockError.textContent = data.error || 'Token errato';
+      lockInput.value = '';
+      lockInput.focus();
+      return;
+    }
+
+    hideLock();
+    if (!updateIntervalId) initApp();
+  } catch {
+    lockError.textContent = 'Errore di connessione';
+  }
+});
+
+async function boot() {
+  try {
+    const res = await fetch(`${API_URL}/auth/status`);
+    const data = await res.json();
+    if (data.required && !data.authenticated) {
+      showLock();
+      return;
+    }
+  } catch {}
+  initApp();
+}
+
+boot();
 let lastUpdateTimestamp = Date.now();
 
 // Update time ago display every 5 seconds (was 1s - reduced for CPU)

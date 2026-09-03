@@ -1,24 +1,27 @@
 # Pi Dashboard 🖥️
 
-A beautiful, real-time monitoring dashboard for Raspberry Pi home servers.
+A real-time monitoring dashboard for Raspberry Pi home servers.
 
-<img width="100%" height="auto" alt="Capture d’écran 2026-01-25 à 23 39 53" src="https://github.com/user-attachments/assets/e2e60248-bbde-43f4-b090-5a6bc7b981c3" />
+> Fork of [zepgram/pi-dashboard](https://github.com/zepgram/pi-dashboard) with an added PM2 process manager and a login/session system to actually protect the dashboard when it's exposed.
+
+
+<img width="100%" height="auto" alt="Pi Dashboard" src="docs/dashboard.png" />
 
 ![Modern 2026 Design](https://img.shields.io/badge/design-modern%202026-blueviolet)
 ![Raspberry Pi](https://img.shields.io/badge/platform-Raspberry%20Pi-c51a4a)
 ![License](https://img.shields.io/badge/license-MIT-green)
-[![Docker Hub](https://img.shields.io/docker/v/usernamedigital/pi-dashboard?label=Docker%20Hub&logo=docker)](https://hub.docker.com/r/usernamedigital/pi-dashboard)
-[![Docker Pulls](https://img.shields.io/docker/pulls/usernamedigital/pi-dashboard)](https://hub.docker.com/r/usernamedigital/pi-dashboard)
 
 ## ✨ Features
 
 - **Real-time monitoring** — CPU, RAM, temperature, disk usage
 - **Temperature insights** — Min/max session tracking, throttling status (via vcgencmd)
 - **Docker integration** — Container stats with CPU/memory usage
+- **PM2 process manager** — Lists processes managed by PM2 on the host, with CPU/memory per process and Start/Restart/Stop actions from the UI
 - **WireGuard VPN** — Monitor connected clients, transfer stats, last seen
 - **Network stats** — Bandwidth, connections per interface
 - **Service health** — HTTP, TCP, Redis, DNS health checks
 - **External API** — REST API with key authentication for external apps
+- **Login / session protection** — Optional token-gated access with a login screen, signed session cookies and brute-force protection (see [Security](#-security--login))
 - **Modern UI** — Glassmorphism, smooth animations, dark theme
 - **Display modes** — Normal, Compact, and Ultra-compact layouts
 - **Multiple themes** — 5 color themes (cyan, emerald, rose, amber, indigo)
@@ -35,17 +38,12 @@ Silicon/AI aesthetic inspired by Apple System Preferences meets Vercel Dashboard
 - Responsive card-based layout
 - Multiple color themes
 
-## 🚀 Quick Start
+## 🚀 Quick Start (local dev)
 
 ```bash
-# Clone
-git clone https://github.com/zepgram/pi-dashboard.git
+git clone https://github.com/pxlfl4me/pi-dashboard.git
 cd pi-dashboard
-
-# Install
 npm install
-
-# Run (dev)
 npm run dev
 ```
 
@@ -53,34 +51,29 @@ Dashboard available at `http://localhost:5173`
 
 ## 🐳 Docker
 
-### Quick Start (Docker Hub)
-
-The easiest way — use the pre-built multi-arch image (supports amd64 and arm64):
+This fork adds custom features (PM2 manager, login system) that **aren't in the public `usernamedigital/pi-dashboard` image on Docker Hub**. You need to build the image yourself from this repo — pulling the prebuilt image from Docker Hub will give you the old dashboard without any of this.
 
 ```bash
-# Create a directory for your config
-mkdir -p pi-dashboard/data && cd pi-dashboard
+# Clone your fork
+git clone https://github.com/pxlfl4me/pi-dashboard.git
+cd pi-dashboard
 
-# Download docker-compose.yml
-curl -O https://raw.githubusercontent.com/zepgram/pi-dashboard/main/docker-compose.yml
+# Data directory for persistent settings
+mkdir -p data
 
-# Start
-docker compose up -d
+# Admin token, kept out of git via .env
+echo "ADMIN_TOKEN=$(openssl rand -hex 32)" > .env
+
+# Build and start
+docker compose up -d --build
 ```
 
 Dashboard available at `http://your-pi-ip:3001`
 
-### Quick Start (Build from source)
+To update after pulling new changes from GitHub:
 
 ```bash
-# Clone
-git clone https://github.com/zepgram/pi-dashboard.git
-cd pi-dashboard
-
-# Create data directory
-mkdir -p data
-
-# Build and start
+git pull origin main
 docker compose up -d --build
 ```
 
@@ -89,16 +82,15 @@ docker compose up -d --build
 ```yaml
 services:
   pi-dashboard:
-    image: usernamedigital/pi-dashboard:latest
-    # Or build locally:
-    # build: .
+    build: .
     container_name: pi-dashboard
     restart: unless-stopped
 
     environment:
       - PORT=3001
-      - ADMIN_TOKEN=           # Optional: protect config endpoints
-      - CORS_ORIGINS=*         # Or specific origins
+      - SETTINGS_CONFIG=/app/data/settings.json
+      - ADMIN_TOKEN=${ADMIN_TOKEN}   # from .env, empty = login disabled
+      - CORS_ORIGINS=*
 
     volumes:
       # Persistent settings (dashboard config, services, API keys)
@@ -115,11 +107,13 @@ services:
       # WireGuard monitoring (optional)
       - /etc/wireguard:/etc/wireguard:ro
 
-    # Required for full system access
+      # PM2: connects to the HOST's pm2 daemon via its socket files.
+      # ${HOME} resolves to whoever runs `docker compose up`.
+      - ${HOME}/.pm2:/root/.pm2
+
     pid: host
     network_mode: host
 
-    # Required for WireGuard monitoring
     cap_add:
       - NET_ADMIN
 
@@ -130,20 +124,11 @@ services:
       retries: 3
 ```
 
-### Available Tags
-
-| Tag | Description |
-|-----|-------------|
-| `latest` | Latest stable release from main branch |
-| `1.0.0` | Specific version (semver) |
-| `1.0` | Latest patch for minor version |
-| `1` | Latest minor for major version |
-| `<sha>` | Specific commit (7 chars) |
-
 ### Key Points
 
 | Setting | Purpose |
 |---------|---------|
+| `build: .` | Builds from this repo's source instead of pulling the public image |
 | `pid: host` | Access host processes (top processes, accurate CPU stats) |
 | `network_mode: host` | Access host network interfaces, no port mapping needed |
 | `/proc:/host/proc:ro` | Read host CPU, memory, process info |
@@ -151,46 +136,30 @@ services:
 | `/:/host/root:ro` | Read host disk usage, OS info |
 | `/var/run/docker.sock` | Monitor Docker containers |
 | `/etc/wireguard:ro` | Read WireGuard client configs (optional) |
+| `${HOME}/.pm2:/root/.pm2` | Share the host PM2 daemon with the container |
 | `cap_add: NET_ADMIN` | Required for `wg show` command |
 | `./data:/app/data` | Persist settings & API keys across restarts |
+| `.env` (`ADMIN_TOKEN`) | Login token, never committed to git |
 
-### Manual Docker Run
+### PM2 processes not showing up?
+
+The container talks to PM2 through the socket files under `~/.pm2` on the host — it doesn't run its own PM2 daemon. Check:
 
 ```bash
-# Using Docker Hub image
-docker run -d --name pi-dashboard \
-  --pid=host \
-  --network=host \
-  --cap-add=NET_ADMIN \
-  -v $(pwd)/data:/app/data \
-  -v /proc:/host/proc:ro \
-  -v /sys:/host/sys:ro \
-  -v /:/host/root:ro \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  -v /etc/wireguard:/etc/wireguard:ro \
-  usernamedigital/pi-dashboard:latest
-
-# Or build locally
-docker build -t pi-dashboard .
-docker run -d --name pi-dashboard \
-  --pid=host \
-  --network=host \
-  --cap-add=NET_ADMIN \
-  -v $(pwd)/data:/app/data \
-  -v /proc:/host/proc:ro \
-  -v /sys:/host/sys:ro \
-  -v /:/host/root:ro \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  -v /etc/wireguard:/etc/wireguard:ro \
-  pi-dashboard
+pm2 -v                      # PM2 running on the host?
+ls -la ~/.pm2/*.sock        # daemon socket files present?
+docker exec -it pi-dashboard pm2 -v      # pm2 CLI reachable inside the container?
+docker exec -it pi-dashboard pm2 jlist   # can it see your processes?
 ```
+
+If `$HOME` isn't set in the environment that runs `docker compose up` (e.g. a systemd unit), replace `${HOME}/.pm2` in `docker-compose.yml` with the absolute path, e.g. `/home/youruser/.pm2`.
 
 ## 📁 Structure
 
 ```
 ├── server/
-│   ├── index.js      # Express API
-│   └── stats.js      # System stats collector
+│   ├── index.js      # Express API, auth/session, PM2 endpoints
+│   └── stats.js      # System stats + PM2 process collector
 ├── src/
 │   ├── index.html
 │   ├── main.js
@@ -198,6 +167,7 @@ docker run -d --name pi-dashboard \
 ├── data/
 │   └── settings.json # Persistent config (mount as volume)
 ├── Dockerfile
+├── docker-compose.yml
 ├── package.json
 └── vite.config.js
 ```
@@ -232,14 +202,6 @@ All settings are stored in `settings.json` — both dashboard preferences and se
       "checkType": "http",
       "icon": "shield",
       "enabled": true
-    },
-    {
-      "name": "Nextcloud",
-      "port": 8080,
-      "path": "/",
-      "checkType": "http",
-      "icon": "cloud",
-      "enabled": true
     }
   ]
 }
@@ -271,26 +233,27 @@ All settings are stored in `settings.json` — both dashboard preferences and se
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/stats` | GET | CPU, RAM, temp, containers, disks |
-| `/api/settings` | GET | Dashboard settings |
-| `/api/settings` | PUT | Update dashboard settings |
-| `/api/settings/api` | GET | API access settings |
-| `/api/settings/api` | PUT | Enable/disable API, generate key |
+| `/api/stats` | GET | CPU, RAM, temp, containers, disks, PM2 processes |
+| `/api/settings` | GET / PUT | Dashboard settings |
+| `/api/settings/api` | GET / PUT | Enable/disable external API, generate key |
 | `/api/services` | GET | Service health status |
-| `/api/services/config` | GET | Get all services config |
-| `/api/services/config` | PUT | Update all services |
-| `/api/services/config` | POST | Add a service |
+| `/api/services/config` | GET / PUT / POST | Manage configured services |
 | `/api/services/config/:index` | DELETE | Remove a service |
 | `/api/services/discover` | GET | Auto-discover services on listening ports |
 | `/api/sysinfo` | GET | System information |
-| `/api/health` | GET | Dashboard health check |
+| `/api/health` | GET | Dashboard health check (no auth) |
 | `/api/wireguard` | GET | WireGuard clients status |
-| `/api/settings/wireguard` | GET | WireGuard settings (enabled, interface) |
-| `/api/settings/wireguard` | PUT | Update WireGuard settings |
+| `/api/settings/wireguard` | GET / PUT | WireGuard settings |
+| `/api/pm2/:action/:id` | POST | `start` / `restart` / `stop` a PM2 process by id |
+| `/api/auth/status` | GET | Whether login is required and whether you're logged in (no auth) |
+| `/api/auth/login` | POST | `{ "token": "..." }` — logs in, sets the session cookie (no auth) |
+| `/api/auth/logout` | POST | Clears the session cookie (no auth) |
+
+When `ADMIN_TOKEN` is set, every endpoint above except `/api/health` and `/api/auth/*` requires a valid session (or the header, see below).
 
 ### External API (v1)
 
-Public API for external applications, protected by API key.
+Public API for external applications, protected by its own API key — separate from the login system, meant for scripts/integrations rather than browsers.
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -299,61 +262,73 @@ Public API for external applications, protected by API key.
 **Authentication:** Enable API access and generate a key via the dashboard UI (API button in header).
 
 ```bash
-# Using header
 curl -H "X-API-Key: YOUR_KEY" http://your-pi:3001/api/v1/system
-
-# Using query param
 curl "http://your-pi:3001/api/v1/system?key=YOUR_KEY"
 ```
 
-**Response includes:**
-- `system` — manufacturer, model, serial
-- `cpu` — usage, cores, speed, brand
-- `memory` — total, used, free, percent, type (e.g., LPDDR4X)
-- `temperature` — main, max, throttled (bitmask from vcgencmd)
-- `load` — uptime, loadAvg [1m, 5m, 15m]
-- `os` — distro, version, kernel, hostname, arch
-- `disks` — mount points with size/used/available
-- `network` — interfaces (IP, type) + stats (rx/tx bytes/sec)
-- `containers` — Docker containers with CPU/memory stats
-- `processes` — Top 10 processes by CPU usage
-- `baseboard` — hardware info
-- `services` — configured services with health status (online/offline, latency)
-- `wireguard` — (if enabled) interface name + clients array with name, publicKey, endpoint, lastHandshake, transfer, online status
+**Response includes:** system, cpu, memory, temperature, load, os, disks, network, containers, pm2, processes, baseboard, services, wireguard (if enabled).
 
-**Security:** API keys are hashed (SHA256) before storage. The plain key is shown only once at generation — copy it immediately or regenerate.
+**Security:** API keys are hashed (SHA256) before storage. The plain key is shown only once at generation.
 
-## 🔐 Security
+## 🔐 Security & Login
 
-Configure via `docker-compose.yml` or environment variables:
+### Setting up ADMIN_TOKEN
+
+```bash
+openssl rand -hex 32
+```
+
+Put the result in a `.env` file next to `docker-compose.yml` (never commit this file — it's already in `.gitignore`):
+
+```
+ADMIN_TOKEN=your-generated-token-here
+```
+
+Restart with `docker compose up -d --build` for it to take effect. Leave it empty (or don't create `.env`) to run without login — fine for a trusted LAN, not recommended if the dashboard is reachable from anywhere else.
+
+### How the login screen works
+
+With `ADMIN_TOKEN` set:
+
+1. Opening the dashboard shows a lock screen instead of your stats until you enter the token.
+2. On a correct token, the server issues a session cookie (`HttpOnly`, `SameSite=Strict`, valid 12 hours) and the real dashboard loads.
+3. From then on, every API request the page makes — stats, PM2 actions, settings changes — is authenticated through that cookie automatically. No repeated prompts.
+4. When the session expires, the lock screen reappears on the next request that needs it.
+5. Wrong token attempts are rate-limited: after 5 failed tries from the same IP within 10 minutes, further attempts are blocked for a while.
+
+Without `ADMIN_TOKEN` set, the dashboard behaves like before — open access, no login screen. PM2 start/restart/stop actions are the one exception: they stay disabled regardless, since there'd be no secret to protect them with.
+
+For scripts/automation instead of a browser session, the old header still works on every protected endpoint:
+
+```
+X-Admin-Token: your-generated-token-here
+```
+
+### General hardening
+
+- Session cookies are `HttpOnly` (invisible to JS) and `SameSite=Strict` (blocks cross-site requests from using them)
+- Token comparisons use constant-time checks to avoid timing attacks
+- Security headers: `X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`
+- Rate limiting on login attempts and on config-write endpoints
+- Input validation & sanitization, payload size limits
+- CORS origin restrictions (`CORS_ORIGINS` env var)
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `ADMIN_TOKEN` | Auth token for config endpoints | _(empty = no auth)_ |
+| `ADMIN_TOKEN` | Login token / API auth token | _(empty = no login)_ |
 | `CORS_ORIGINS` | Allowed origins (comma-separated) | `*` |
 | `PORT` | Server port | `3001` |
-
-When `ADMIN_TOKEN` is set, config write operations require the header:
-```
-X-Admin-Token: your-secret-token-here
-```
-
-**Security features:**
-- Input validation & sanitization
-- XSS protection
-- Rate limiting (100 req/min on config endpoints)
-- CORS origin restrictions
-- Payload size limits
 
 ## 📋 Requirements
 
 - Node.js 22+
 - Raspberry Pi (ARM64) or any Linux server
 - Docker (optional, for container monitoring)
+- PM2 on the host (optional, only needed for the PM2 section to appear)
 
 ### 💡 Raspberry Pi: Container Stats
 
-Pi Dashboard reads container CPU from cgroups v2 (`/sys/fs/cgroup/.../cpu.stat`) and memory from `/proc/[PID]/status`. Works **without** enabling the memory cgroup controller — no kernel modifications needed!
+Pi Dashboard reads container CPU from cgroups v2 (`/sys/fs/cgroup/.../cpu.stat`) and memory from `/proc/[PID]/status`. Works **without** enabling the memory cgroup controller — no kernel modifications needed.
 
 CPU usage is normalized to 100% (total CPU capacity), not per-core.
 
@@ -369,6 +344,8 @@ CPU usage is normalized to 100% (total CPU capacity), not per-core.
 - [x] WireGuard VPN monitoring
 - [x] Temperature min/max + throttling status
 - [x] Display modes (normal/compact/ultra)
+- [x] PM2 process manager (list + start/restart/stop)
+- [x] Login screen with session cookies and rate-limited auth
 - [ ] Historical charts (last hour/day)
 - [ ] Log viewer
 - [ ] Multi-server support
@@ -379,4 +356,4 @@ MIT — do whatever you want with it.
 
 ---
 
-Built with ☕ on a Raspberry Pi 5
+Fork maintained by [pxlfl4me](https://github.com/pxlfl4me), based on [zepgram/pi-dashboard](https://github.com/zepgram/pi-dashboard)
