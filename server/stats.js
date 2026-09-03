@@ -24,7 +24,7 @@ function getThrottleStatus() {
       if (flags & 0x20000) reasons.push('Freq cap occurred');
       if (flags & 0x40000) reasons.push('Throttling occurred');
       if (flags & 0x80000) reasons.push('Soft temp limit occurred');
-      
+
       return {
         throttled: (flags & 0xF) !== 0, // Current throttling active
         flags,
@@ -41,7 +41,7 @@ function getThrottleStatus() {
 // Pi 5 base: 2400 MHz, Pi 4 base: 1500 MHz
 function getOverclockStatus() {
   let configuredFreq = null;
-  
+
   // Try reading from boot config files (works in container)
   const configPaths = [
     '/host/root/boot/firmware/config.txt',
@@ -49,7 +49,7 @@ function getOverclockStatus() {
     '/boot/firmware/config.txt',
     '/boot/config.txt'
   ];
-  
+
   for (const configPath of configPaths) {
     try {
       const config = fs.readFileSync(configPath, 'utf-8');
@@ -58,22 +58,22 @@ function getOverclockStatus() {
         configuredFreq = parseInt(match[1], 10);
         break;
       }
-    } catch (e) {}
+    } catch (e) { }
   }
-  
+
   // Fallback to vcgencmd if config file not found
   if (!configuredFreq) {
     try {
       const output = execSync('vcgencmd get_config arm_freq 2>/dev/null', { encoding: 'utf-8', timeout: 1000 });
       const match = output.match(/arm_freq=(\d+)/);
       if (match) configuredFreq = parseInt(match[1], 10);
-    } catch (e) {}
+    } catch (e) { }
   }
-  
+
   if (!configuredFreq) {
     return { configured: null, base: null, overclocked: false };
   }
-  
+
   // Detect Pi model and base frequency
   let baseFreq = 1500; // Default Pi 4
   const modelPaths = [
@@ -87,9 +87,9 @@ function getOverclockStatus() {
       if (model.includes('Pi 5')) { baseFreq = 2400; break; }
       else if (model.includes('Pi 4')) { baseFreq = 1500; break; }
       else if (model.includes('Pi 3')) { baseFreq = 1200; break; }
-    } catch (e) {}
+    } catch (e) { }
   }
-  
+
   return {
     configured: configuredFreq,
     base: baseFreq,
@@ -115,24 +115,24 @@ setInterval(() => {
 
 // Known UDP services (VPNs, etc.) - subset of KNOWN_SERVICES for UDP discovery
 const KNOWN_UDP_SERVICES = {
-  500:   { name: 'IKEv2/IPSec', icon: 'shield', checkType: 'interface', interface: 'ipsec0' },
-  1194:  { name: 'OpenVPN', icon: 'shield', checkType: 'interface', interface: 'tun0' },
-  1723:  { name: 'PPTP', icon: 'shield', checkType: 'tcp' },
-  4500:  { name: 'IPSec NAT-T', icon: 'shield', checkType: 'interface', interface: 'ipsec0' },
+  500: { name: 'IKEv2/IPSec', icon: 'shield', checkType: 'interface', interface: 'ipsec0' },
+  1194: { name: 'OpenVPN', icon: 'shield', checkType: 'interface', interface: 'tun0' },
+  1723: { name: 'PPTP', icon: 'shield', checkType: 'tcp' },
+  4500: { name: 'IPSec NAT-T', icon: 'shield', checkType: 'interface', interface: 'ipsec0' },
   51820: { name: 'WireGuard', icon: 'shield', checkType: 'interface', interface: 'wg0' },
 };
 
 export async function discoverServices() {
   const discovered = [];
   const seen = new Set();
-  
+
   try {
     // Get TCP listening ports
     const tcpOutput = execSync(
       'ss -tlnp 2>/dev/null || netstat -tlnp 2>/dev/null',
       { encoding: 'utf-8', timeout: 5000 }
     );
-    
+
     // Get UDP listening ports (for VPNs)
     let udpOutput = '';
     try {
@@ -143,24 +143,24 @@ export async function discoverServices() {
     } catch (e) {
       // UDP scan optional
     }
-    
+
     // Process TCP ports
     const tcpLines = tcpOutput.split('\n').filter(l => l.includes('LISTEN'));
-    
+
     for (const line of tcpLines) {
       const addrMatch = line.match(/(?:0\.0\.0\.0|127\.0\.0\.1|\*|::):(\d+)/);
       if (!addrMatch) continue;
-      
+
       const port = parseInt(addrMatch[1], 10);
       if (port > 32767 || seen.has(port)) continue;
       seen.add(port);
-      
+
       const isLocalhost = line.includes('127.0.0.1');
       if (isLocalhost) continue;
-      
+
       const processMatch = line.match(/users:\(\("([^"]+)"/);
       const processName = processMatch ? processMatch[1] : null;
-      
+
       let service = null;
       if (processName && KNOWN_PROCESSES[processName]) {
         service = { ...KNOWN_PROCESSES[processName], port };
@@ -175,7 +175,7 @@ export async function discoverServices() {
           path: '/'
         };
       }
-      
+
       if (service) {
         discovered.push({
           name: service.name,
@@ -190,17 +190,17 @@ export async function discoverServices() {
         });
       }
     }
-    
+
     // Process UDP ports (VPNs)
     const udpLines = udpOutput.split('\n').filter(l => l.includes('UNCONN') || l.includes('udp'));
-    
+
     for (const line of udpLines) {
       const addrMatch = line.match(/(?:0\.0\.0\.0|\*|::):(\d+)/);
       if (!addrMatch) continue;
-      
+
       const port = parseInt(addrMatch[1], 10);
       if (seen.has(port)) continue;
-      
+
       // Only add known UDP services (VPNs)
       if (KNOWN_UDP_SERVICES[port]) {
         seen.add(port);
@@ -218,14 +218,14 @@ export async function discoverServices() {
         });
       }
     }
-    
+
     // Sort by port
     discovered.sort((a, b) => a.port - b.port);
-    
+
   } catch (error) {
     console.error('Service discovery failed:', error.message);
   }
-  
+
   return discovered;
 }
 
@@ -251,10 +251,10 @@ export async function getSystemInfo() {
 
   // Use baseboard info as fallback for system info (Docker container issue)
   const manufacturer = system.manufacturer || baseboard.manufacturer || '';
-  const model = (system.model === 'Docker Container' || !system.model) 
+  const model = (system.model === 'Docker Container' || !system.model)
     ? `${baseboard.model || ''} ${baseboard.version || ''}`.trim()
     : system.model;
-  
+
   // Detect memory type from baseboard model + version
   const fullModel = `${baseboard.model || ''} ${baseboard.version || ''}`.trim();
   const memType = mem.type && mem.type !== 'Unknown' ? mem.type : detectMemoryType(fullModel);
@@ -309,7 +309,7 @@ async function getHostDisks() {
   try {
     // Check if we're in a container with host root mounted
     const hostRootExists = fs.existsSync('/host/root/proc');
-    
+
     if (hostRootExists) {
       // Use nsenter with pid:host to run df in host namespace
       try {
@@ -323,13 +323,13 @@ async function getHostDisks() {
         return await getHostDisksViaMounts();
       }
     }
-    
+
     // Not in container, use df directly
     const output = execSync(
       'df -B1 2>/dev/null | grep "^/dev/"',
       { encoding: 'utf-8', timeout: 5000 }
     );
-    
+
     return parseDF(output);
   } catch (error) {
     console.error('Failed to get disk info:', error.message);
@@ -342,11 +342,11 @@ function parseDF(output) {
   const lines = output.trim().split('\n');
   const disks = [];
   const seen = new Set();
-  
+
   for (const line of lines) {
     const parts = line.trim().split(/\s+/);
     if (parts.length < 6) continue;
-    
+
     const device = parts[0];
     const size = parseInt(parts[1], 10) || 0;
     const used = parseInt(parts[2], 10) || 0;
@@ -354,7 +354,7 @@ function parseDF(output) {
     const percentStr = parts[4].replace('%', '');
     const percent = parseFloat(percentStr) || 0;
     const mount = parts[5];
-    
+
     // Skip small partitions, loop devices, boot partitions, and duplicates
     if (size > 100 * 1024 * 1024 && !device.includes('loop') && !mount.startsWith('/boot') && !seen.has(device)) {
       seen.add(device);
@@ -368,7 +368,7 @@ function parseDF(output) {
       });
     }
   }
-  
+
   return disks;
 }
 
@@ -379,7 +379,7 @@ async function getHostDisksViaMounts() {
     { path: '/host/root', mount: '/' },
     { path: '/host/root/media/ssd', mount: '/media/ssd' }
   ];
-  
+
   for (const { path, mount } of mountPaths) {
     try {
       if (fs.existsSync(path)) {
@@ -403,7 +403,7 @@ async function getHostDisksViaMounts() {
       // Skip this mount
     }
   }
-  
+
   return disks;
 }
 
@@ -416,14 +416,14 @@ async function getTopProcesses() {
       'ps -eo pid,%cpu,%mem,stat,etime,comm,args --sort=-%cpu | head -15',
       { encoding: 'utf-8', timeout: 5000 }
     );
-    
+
     const lines = output.trim().split('\n').slice(1); // Skip header
     const processes = [];
-    
+
     for (const line of lines) {
       const parts = line.trim().split(/\s+/);
       if (parts.length < 6) continue;
-      
+
       const pid = parseInt(parts[0], 10);
       const cpu = parseFloat(parts[1]) || 0;
       const mem = parseFloat(parts[2]) || 0;
@@ -432,7 +432,7 @@ async function getTopProcesses() {
       const name = parts[5] || 'unknown';
       // Full command is everything from index 6 onwards
       const cmd = parts.slice(6).join(' ') || name;
-      
+
       // Skip kernel threads (pid 1 or 2) and idle processes
       if (pid > 2 && cpu >= 0) {
         processes.push({
@@ -446,7 +446,7 @@ async function getTopProcesses() {
         });
       }
     }
-    
+
     return processes.slice(0, 10);
   } catch (error) {
     console.error('Failed to get processes:', error.message);
@@ -460,9 +460,17 @@ async function getTopProcesses() {
 
 // Detect PM2 presence once and cache the result for the process lifetime
 let pm2AvailableCache = null;
+let pm2NextCheck = 0;
 
 function isPm2Available() {
-  if (pm2AvailableCache !== null) return pm2AvailableCache;
+  if (pm2AvailableCache === true) return true;
+
+  const now = Date.now();
+
+  // retry only every 15 seconds
+  if (now < pm2NextCheck) return false;
+
+  pm2NextCheck = now + 15000;
 
   try {
     execSync('pm2 --version', {
@@ -470,12 +478,12 @@ function isPm2Available() {
       timeout: 1000,
       stdio: ['ignore', 'pipe', 'ignore']
     });
-    pm2AvailableCache = true;
-  } catch (e) {
-    pm2AvailableCache = false;
-  }
 
-  return pm2AvailableCache;
+    pm2AvailableCache = true;
+    return true;
+  } catch (e) {
+    return false;
+  }
 }
 
 // Get PM2 process list via `pm2 jlist` (only called when PM2 is available)
@@ -529,12 +537,12 @@ export function pm2Action(action, id) {
 
 // Read CPU usage from cgroup v2 cpu.stat
 function readCgroupCpuUsage(containerId) {
-  const cgroupBase = fs.existsSync('/host/sys/fs/cgroup') 
-    ? '/host/sys/fs/cgroup' 
+  const cgroupBase = fs.existsSync('/host/sys/fs/cgroup')
+    ? '/host/sys/fs/cgroup'
     : '/sys/fs/cgroup';
-  
+
   const cgroupPath = `${cgroupBase}/system.slice/docker-${containerId}.scope/cpu.stat`;
-  
+
   try {
     const content = fs.readFileSync(cgroupPath, 'utf-8');
     const usageMatch = content.match(/usage_usec\s+(\d+)/);
@@ -549,23 +557,23 @@ function readCgroupCpuUsage(containerId) {
 // 100% = ALL cores maxed out
 function calculateCpuPercent(containerId, currentUsageUsec) {
   if (currentUsageUsec === null) return 0;
-  
+
   const now = Date.now() * 1000; // Convert to microseconds
   const cached = cpuCache.get(containerId);
-  
+
   // Store current measurement
   cpuCache.set(containerId, { usageUsec: currentUsageUsec, timeUsec: now });
-  
+
   if (!cached) return 0; // First measurement, no delta yet
-  
+
   const deltaUsage = currentUsageUsec - cached.usageUsec;
   const deltaTime = now - cached.timeUsec;
-  
+
   if (deltaTime <= 0 || deltaUsage < 0) return 0;
-  
+
   // CPU percent normalized: divide by NUM_CPUS so 100% = all cores maxed
   const cpuPercent = (deltaUsage / deltaTime) * 100 / NUM_CPUS;
-  
+
   return Math.round(cpuPercent * 10) / 10;
 }
 
@@ -576,31 +584,31 @@ async function getDockerContainerStats() {
     // Use Docker API via socket to get container info
     const containers = await dockerApiGet('/containers/json');
     if (!containers || containers.length === 0) return new Map();
-    
+
     // Get total system memory for percentage calculation
     const procPath = fs.existsSync('/host/proc/meminfo') ? '/host/proc/meminfo' : '/proc/meminfo';
     const memInfo = fs.readFileSync(procPath, 'utf-8');
     const memTotalMatch = memInfo.match(/MemTotal:\s+(\d+)/);
     const memTotalKB = memTotalMatch ? parseInt(memTotalMatch[1], 10) : 1;
-    
+
     const statsMap = new Map();
-    
+
     for (const container of containers) {
       const shortId = container.Id.substring(0, 12);
       const fullId = container.Id;
-      
+
       // Get detailed container info including PID
       try {
         const info = await dockerApiGet(`/containers/${fullId}/json`);
         const pid = info.State?.Pid;
-        
+
         // Memory from /proc/[PID]/status
         let memUsageKB = 0;
         if (pid && pid > 0) {
-          const procStatusPath = fs.existsSync('/host/proc') 
+          const procStatusPath = fs.existsSync('/host/proc')
             ? `/host/proc/${pid}/status`
             : `/proc/${pid}/status`;
-          
+
           try {
             const status = fs.readFileSync(procStatusPath, 'utf-8');
             const vmRssMatch = status.match(/VmRSS:\s+(\d+)/);
@@ -609,13 +617,13 @@ async function getDockerContainerStats() {
             // Process might have exited or no access
           }
         }
-        
+
         // CPU from cgroups
         const cpuUsageUsec = readCgroupCpuUsage(fullId);
         const cpuPercent = calculateCpuPercent(fullId, cpuUsageUsec);
-        
+
         const memPercent = (memUsageKB / memTotalKB) * 100;
-        
+
         statsMap.set(shortId, {
           cpuPercent,
           memPercent: Math.round(memPercent * 10) / 10,
@@ -644,7 +652,7 @@ function dockerApiGet(path) {
       path: path,
       method: 'GET',
     };
-    
+
     const req = http.request(options, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
@@ -656,7 +664,7 @@ function dockerApiGet(path) {
         }
       });
     });
-    
+
     req.on('error', reject);
     req.setTimeout(5000, () => {
       req.destroy();
@@ -673,19 +681,19 @@ function getHostOsInfo() {
     const hostRoot = fs.existsSync('/host/root/etc') ? '/host/root' : '';
     const osReleasePath = `${hostRoot}/etc/os-release`;
     const rpiIssuePath = `${hostRoot}/etc/rpi-issue`;
-    
+
     const content = fs.readFileSync(osReleasePath, 'utf-8');
     const info = {};
-    
+
     content.split('\n').forEach(line => {
       const [key, ...valueParts] = line.split('=');
       if (key && valueParts.length) {
         info[key] = valueParts.join('=').replace(/^"|"$/g, '');
       }
     });
-    
+
     let distro = info.PRETTY_NAME || info.NAME || 'Linux';
-    
+
     // Check for Raspberry Pi OS (rpi-issue exists)
     let version = info.VERSION_ID || '';
     if (fs.existsSync(rpiIssuePath)) {
@@ -702,7 +710,7 @@ function getHostOsInfo() {
         // Ignore
       }
     }
-    
+
     // Check for available updates (apt)
     let updatesAvailable = 0;
     try {
@@ -714,7 +722,7 @@ function getHostOsInfo() {
     } catch (e) {
       // apt not available or error
     }
-    
+
     return {
       distro,
       version,
@@ -752,22 +760,22 @@ function getHostNetworkStats() {
     const procPath = fs.existsSync('/host/proc/net/dev') ? '/host/proc/net/dev' : '/proc/net/dev';
     const content = fs.readFileSync(procPath, 'utf-8');
     const lines = content.trim().split('\n').slice(2); // Skip headers
-    
+
     const now = Date.now();
     const deltaMs = networkCache.lastTime > 0 ? now - networkCache.lastTime : 1000;
     const stats = [];
-    
+
     for (const line of lines) {
       const parts = line.trim().split(/[:\s]+/);
       if (parts.length < 11) continue;
-      
+
       const iface = parts[0];
       // Skip loopback, veth, and bridge interfaces
       if (iface === 'lo' || iface.startsWith('veth') || iface.startsWith('br-') || iface === 'docker0') continue;
-      
+
       const rxBytes = parseInt(parts[1], 10) || 0;
       const txBytes = parseInt(parts[9], 10) || 0;
-      
+
       // Calculate per-second rates from delta
       const lastStat = networkCache.lastStats.get(iface);
       let rxSec = 0, txSec = 0;
@@ -775,9 +783,9 @@ function getHostNetworkStats() {
         rxSec = Math.max(0, Math.round((rxBytes - lastStat.rxBytes) / (deltaMs / 1000)));
         txSec = Math.max(0, Math.round((txBytes - lastStat.txBytes) / (deltaMs / 1000)));
       }
-      
+
       networkCache.lastStats.set(iface, { rxBytes, txBytes });
-      
+
       stats.push({
         iface,
         rxBytes,
@@ -786,7 +794,7 @@ function getHostNetworkStats() {
         txSec
       });
     }
-    
+
     networkCache.lastTime = now;
     return stats;
   } catch (error) {
@@ -799,7 +807,7 @@ function getHostNetworkStats() {
 function getHostNetworkInfo() {
   const stats = getHostNetworkStats();
   const interfaces = [];
-  
+
   for (const stat of stats) {
     // Get IP using ip command (Alpine-compatible)
     let ip4 = '';
@@ -812,7 +820,7 @@ function getHostNetworkInfo() {
     } catch (e) {
       // Interface might not have an IP
     }
-    
+
     interfaces.push({
       name: stat.iface,
       ip4: ip4 || 'N/A',
@@ -821,13 +829,13 @@ function getHostNetworkInfo() {
       speed: 0
     });
   }
-  
+
   return { interfaces, stats };
 }
 
 export async function getSystemStats() {
   const now = Date.now();
-  
+
   // Refresh static data only every minute
   if (!staticCache.osInfo || now - staticCache.lastStaticRefresh > STATIC_CACHE_TTL) {
     const [osInfo, networkInterfaces] = await Promise.all([
@@ -839,13 +847,13 @@ export async function getSystemStats() {
     staticCache.networkInterfaces = networkInterfaces;
     staticCache.lastStaticRefresh = now;
   }
-  
+
   // Refresh disk data only every 30 seconds
   if (now - staticCache.lastDiskCheck > DISK_CACHE_TTL) {
     staticCache.disks = await getHostDisks();
     staticCache.lastDiskCheck = now;
   }
-  
+
   // Fast-changing data - fetch every time
   const [cpu, mem, temp, time, networkStats, cpuSpeed] = await Promise.all([
     si.currentLoad(),
@@ -855,7 +863,7 @@ export async function getSystemStats() {
     si.networkStats().catch(() => []),
     si.cpuCurrentSpeed().catch(() => ({ avg: 0, cores: [] }))
   ]);
-  
+
   const osInfo = staticCache.osInfo;
   const networkInterfaces = staticCache.networkInterfaces;
 
@@ -864,16 +872,16 @@ export async function getSystemStats() {
   try {
     // Get container list from systeminformation
     const dockerContainers = await si.dockerContainers();
-    
+
     if (dockerContainers.length > 0) {
       // Get real stats using docker stats command
       const statsMap = await getDockerContainerStats();
-      
+
       containers = dockerContainers.map(container => {
         // Match by short ID (first 12 chars)
         const shortId = container.id.substring(0, 12);
         const stats = statsMap.get(shortId) || {};
-        
+
         return {
           id: container.id,
           name: container.name,
